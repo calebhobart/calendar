@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react'
 import { CalendarConnection } from '../lib/supabase'
 
 interface CalendarSidebarProps {
@@ -6,8 +7,10 @@ interface CalendarSidebarProps {
   onToggleCalendar: (id: string) => void
   onConnectCalendar: () => void
   onSyncCalendar: (id: string, provider: string) => void
+  onDeleteCalendar: (id: string) => void
   onSignOut: () => void
   syncingCalendarId: string | null
+  deletingCalendarId: string | null
 }
 
 export default function CalendarSidebar({
@@ -16,9 +19,26 @@ export default function CalendarSidebar({
   onToggleCalendar,
   onConnectCalendar,
   onSyncCalendar,
+  onDeleteCalendar,
   onSignOut,
   syncingCalendarId,
+  deletingCalendarId,
 }: CalendarSidebarProps) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   function formatLastSynced(dateStr: string | null): string {
     if (!dateStr) return 'Never synced'
     const date = new Date(dateStr)
@@ -119,17 +139,20 @@ export default function CalendarSidebar({
             {calendars.map((calendar) => {
               const isActive = activeCalendarIds.has(calendar.id)
               const isSyncing = syncingCalendarId === calendar.id
+              const isDeleting = deletingCalendarId === calendar.id
+              const isMenuOpen = openMenuId === calendar.id
 
               return (
                 <div
                   key={calendar.id}
-                  className="p-3 rounded-xl border border-surface-100 hover:border-surface-200 
-                           transition-colors bg-surface-50/50"
+                  className={`p-3 rounded-xl border border-surface-100 hover:border-surface-200 
+                           transition-colors bg-surface-50/50 ${isDeleting ? 'opacity-50' : ''}`}
                 >
                   <div className="flex items-center gap-3">
                     {/* Toggle checkbox */}
                     <button
                       onClick={() => onToggleCalendar(calendar.id)}
+                      disabled={isDeleting}
                       className={`w-5 h-5 rounded flex items-center justify-center transition-colors
                         ${isActive
                           ? 'text-white'
@@ -161,32 +184,81 @@ export default function CalendarSidebar({
                         </span>
                       </div>
                       <p className="text-xs text-surface-400 mt-0.5">
-                        {formatLastSynced(calendar.last_synced_at)}
+                        {isDeleting ? 'Disconnecting...' : formatLastSynced(calendar.last_synced_at)}
                       </p>
                     </div>
 
-                    {/* Sync button */}
-                    <button
-                      onClick={() => onSyncCalendar(calendar.id, calendar.provider)}
-                      disabled={isSyncing}
-                      className="p-1.5 text-surface-400 hover:text-primary-500 hover:bg-primary-50 
-                               rounded-lg transition-colors disabled:opacity-50"
-                      title="Sync now"
-                    >
-                      <svg
-                        className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+                    {/* Three-dot menu */}
+                    <div className="relative" ref={isMenuOpen ? menuRef : null}>
+                      <button
+                        onClick={() => setOpenMenuId(isMenuOpen ? null : calendar.id)}
+                        disabled={isDeleting}
+                        className="p-1.5 text-surface-400 hover:text-surface-600 hover:bg-surface-100 
+                                 rounded-lg transition-colors disabled:opacity-50"
+                        title="More options"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        />
-                      </svg>
-                    </button>
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="6" r="1.5" />
+                          <circle cx="12" cy="12" r="1.5" />
+                          <circle cx="12" cy="18" r="1.5" />
+                        </svg>
+                      </button>
+
+                      {/* Dropdown menu */}
+                      {isMenuOpen && (
+                        <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg 
+                                      border border-surface-200 py-1 z-10">
+                          {/* Sync now */}
+                          <button
+                            onClick={() => {
+                              onSyncCalendar(calendar.id, calendar.provider)
+                              setOpenMenuId(null)
+                            }}
+                            disabled={isSyncing}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-surface-700 
+                                     hover:bg-surface-50 transition-colors disabled:opacity-50"
+                          >
+                            <svg
+                              className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
+                            </svg>
+                            {isSyncing ? 'Syncing...' : 'Sync now'}
+                          </button>
+
+                          {/* Divider */}
+                          <div className="h-px bg-surface-100 my-1" />
+
+                          {/* Disconnect */}
+                          <button
+                            onClick={() => {
+                              onDeleteCalendar(calendar.id)
+                              setOpenMenuId(null)
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 
+                                     hover:bg-red-50 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6"
+                              />
+                            </svg>
+                            Disconnect
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )

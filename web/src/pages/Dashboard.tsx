@@ -11,7 +11,9 @@ export default function Dashboard() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [showProviderModal, setShowProviderModal] = useState(false)
+  const [calendarToDelete, setCalendarToDelete] = useState<CalendarConnection | null>(null)
 
   // Fetch calendars and events
   const fetchData = useCallback(async () => {
@@ -108,6 +110,37 @@ export default function Dashboard() {
     }
   }
 
+  // Handle delete calendar - show confirmation modal
+  function handleDeleteCalendar(calendarId: string) {
+    const calendar = calendars.find((c) => c.id === calendarId)
+    if (calendar) {
+      setCalendarToDelete(calendar)
+    }
+  }
+
+  // Confirm and execute calendar deletion
+  async function confirmDeleteCalendar() {
+    if (!calendarToDelete) return
+
+    setDeleting(calendarToDelete.id)
+    setCalendarToDelete(null)
+
+    try {
+      const { error } = await supabase.functions.invoke('delete-calendar-connection', {
+        body: { connection_id: calendarToDelete.id },
+      })
+
+      if (error) throw error
+
+      // Refresh data after deletion
+      await fetchData()
+    } catch (error) {
+      console.error('Delete error:', error)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
   // Handle sign out
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -138,8 +171,10 @@ export default function Dashboard() {
         onToggleCalendar={handleCalendarToggle}
         onConnectCalendar={handleConnectCalendar}
         onSyncCalendar={handleSyncCalendar}
+        onDeleteCalendar={handleDeleteCalendar}
         onSignOut={handleSignOut}
         syncingCalendarId={syncing}
+        deletingCalendarId={deleting}
       />
 
       {/* Main content */}
@@ -227,6 +262,51 @@ export default function Dashboard() {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {calendarToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            {/* Warning icon */}
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+            </div>
+
+            <h2 className="text-lg font-semibold text-surface-900 text-center mb-2">
+              Disconnect Calendar?
+            </h2>
+            <p className="text-sm text-surface-500 text-center mb-6">
+              Are you sure you want to disconnect{' '}
+              <span className="font-medium text-surface-700">{calendarToDelete.calendar_name}</span>?
+              This will remove all synced events from this calendar.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCalendarToDelete(null)}
+                className="flex-1 py-2.5 text-sm font-medium text-surface-600 
+                         hover:text-surface-900 hover:bg-surface-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteCalendar}
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-red-600 
+                         hover:bg-red-700 rounded-lg transition-colors"
+              >
+                Disconnect
+              </button>
+            </div>
           </div>
         </div>
       )}
