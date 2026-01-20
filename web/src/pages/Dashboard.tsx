@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, CalendarConnection, CalendarEvent, getGoogleOAuthUrl, getMicrosoftOAuthUrl } from '../lib/supabase'
 import Calendar from '../components/Calendar'
 import CalendarSidebar from '../components/CalendarSidebar'
@@ -14,6 +14,17 @@ export default function Dashboard() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [showProviderModal, setShowProviderModal] = useState(false)
   const [calendarToDelete, setCalendarToDelete] = useState<CalendarConnection | null>(null)
+  
+  // ICS import state
+  const [showICSModal, setShowICSModal] = useState(false)
+  const [icsInputMode, setIcsInputMode] = useState<'url' | 'file'>('url')
+  const [icsUrl, setIcsUrl] = useState('')
+  const [icsFileName, setIcsFileName] = useState('')
+  const [icsFileContent, setIcsFileContent] = useState('')
+  const [icsCalendarName, setIcsCalendarName] = useState('')
+  const [icsImporting, setIcsImporting] = useState(false)
+  const [icsError, setIcsError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch calendars and events
   const fetchData = useCallback(async () => {
@@ -91,9 +102,14 @@ export default function Dashboard() {
   async function handleSyncCalendar(calendarId: string, provider: string) {
     setSyncing(calendarId)
     try {
-      const functionName = provider === 'outlook' 
-        ? 'sync-microsoft-calendar' 
-        : 'sync-google-calendar'
+      let functionName: string
+      if (provider === 'outlook') {
+        functionName = 'sync-microsoft-calendar'
+      } else if (provider === 'apple') {
+        functionName = 'sync-ics-calendar'
+      } else {
+        functionName = 'sync-google-calendar'
+      }
       
       const { error } = await supabase.functions.invoke(functionName, {
         body: { calendar_connection_id: calendarId },
@@ -108,6 +124,119 @@ export default function Dashboard() {
     } finally {
       setSyncing(null)
     }
+  }
+
+  // Handle ICS file selection
+  function handleICSFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.ics')) {
+      setIcsError('Please select a valid .ics file')
+      return
+    }
+
+    setIcsFileName(file.name)
+    setIcsError('')
+
+    // Read file content
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const content = event.target?.result as string
+      setIcsFileContent(content)
+      
+      // Auto-set calendar name from filename if empty
+      if (!icsCalendarName) {
+        const nameFromFile = file.name.replace(/\.ics$/i, '').replace(/[_-]/g, ' ')
+        setIcsCalendarName(nameFromFile)
+      }
+    }
+    reader.onerror = () => {
+      setIcsError('Failed to read file')
+    }
+    reader.readAsText(file)
+  }
+
+  // Handle ICS import
+  async function handleICSImport() {
+    setIcsError('')
+
+    // Validation
+    if (!icsCalendarName.trim()) {
+      setIcsError('Please enter a calendar name')
+      return
+    }
+
+    if (icsInputMode === 'url' && !icsUrl.trim()) {
+      setIcsError('Please enter a calendar URL')
+      return
+    }
+
+    if (icsInputMode === 'file' && !icsFileContent) {
+      setIcsError('Please select an ICS file')
+      return
+    }
+
+    setIcsImporting(true)
+
+    try {
+      // Import the calendar
+      const { data: importData, error: importError } = await supabase.functions.invoke('import-ics-calendar', {
+        body: {
+          ics_url: icsInputMode === 'url' ? icsUrl.trim() : undefined,
+          ics_content: icsInputMode === 'file' ? icsFileContent : undefined,
+          calendar_name: icsCalendarName.trim(),
+        },
+      })
+
+      if (importError) throw importError
+
+      if (!importData.success) {
+        throw new Error(importData.error || 'Failed to import calendar')
+      }
+
+      // Trigger initial sync
+      const { error: syncError } = await supabase.functions.invoke('sync-ics-calendar', {
+        body: {
+          calendar_connection_id: importData.calendar.id,
+          ics_content: importData.ics_content, // For file uploads
+        },
+      })
+
+      if (syncError) {
+        console.error('Initial sync error:', syncError)
+        // Don't throw - calendar was created, sync can be retried
+      }
+
+      // Close modal and refresh
+      resetICSModal()
+      await fetchData()
+    } catch (error: any) {
+      console.error('ICS import error:', error)
+      setIcsError(error.message || 'Failed to import calendar')
+    } finally {
+      setIcsImporting(false)
+    }
+  }
+
+  // Reset ICS modal state
+  function resetICSModal() {
+    setShowICSModal(false)
+    setIcsInputMode('url')
+    setIcsUrl('')
+    setIcsFileName('')
+    setIcsFileContent('')
+    setIcsCalendarName('')
+    setIcsError('')
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Open ICS modal from provider selection
+  function handleSelectICS() {
+    setShowProviderModal(false)
+    setShowICSModal(true)
   }
 
   // Handle delete calendar - show confirmation modal
@@ -252,6 +381,28 @@ export default function Dashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
+
+              {/* ICS / Apple Calendar */}
+              <button
+                onClick={handleSelectICS}
+                className="w-full flex items-center gap-4 p-4 rounded-xl border border-surface-200 
+                         hover:border-surface-300 hover:bg-surface-50 transition-colors"
+              >
+                <div className="w-10 h-10 rounded-lg bg-white border border-surface-200 
+                              flex items-center justify-center">
+                  <svg className="w-6 h-6" viewBox="0 0 24 24">
+                    <path fill="#a855f7" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"/>
+                    <path fill="#a855f7" d="M12 13h5v5h-5z"/>
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="font-medium text-surface-900">ICS / Apple Calendar</p>
+                  <p className="text-xs text-surface-500">Import from URL or file</p>
+                </div>
+                <svg className="w-5 h-5 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
             </div>
 
             {/* Cancel button */}
@@ -305,6 +456,162 @@ export default function Dashboard() {
                          hover:bg-red-700 rounded-lg transition-colors"
               >
                 Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ICS Import Modal */}
+      {showICSModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-lg font-semibold text-surface-900 mb-2">
+              Import ICS Calendar
+            </h2>
+            <p className="text-sm text-surface-500 mb-6">
+              Import events from an ICS feed URL or upload a .ics file
+            </p>
+
+            {/* Input mode toggle */}
+            <div className="flex gap-2 p-1 bg-surface-100 rounded-lg mb-6">
+              <button
+                onClick={() => setIcsInputMode('url')}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors
+                  ${icsInputMode === 'url'
+                    ? 'bg-white text-surface-900 shadow-sm'
+                    : 'text-surface-500 hover:text-surface-700'
+                  }`}
+              >
+                URL Feed
+              </button>
+              <button
+                onClick={() => setIcsInputMode('file')}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors
+                  ${icsInputMode === 'file'
+                    ? 'bg-white text-surface-900 shadow-sm'
+                    : 'text-surface-500 hover:text-surface-700'
+                  }`}
+              >
+                File Upload
+              </button>
+            </div>
+
+            {/* URL input */}
+            {icsInputMode === 'url' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-surface-700 mb-1.5">
+                  Calendar URL
+                </label>
+                <input
+                  type="url"
+                  value={icsUrl}
+                  onChange={(e) => setIcsUrl(e.target.value)}
+                  placeholder="https://... or webcal://..."
+                  className="w-full px-3 py-2.5 border border-surface-200 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                           placeholder:text-surface-400"
+                />
+                <p className="mt-1.5 text-xs text-surface-400">
+                  Supports iCloud sharing links, webcal:// URLs, and direct .ics URLs
+                </p>
+              </div>
+            )}
+
+            {/* File input */}
+            {icsInputMode === 'file' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-surface-700 mb-1.5">
+                  ICS File
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".ics"
+                  onChange={handleICSFileChange}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-3 py-4 border-2 border-dashed border-surface-200 rounded-lg
+                           hover:border-primary-300 hover:bg-primary-50/50 transition-colors
+                           flex flex-col items-center gap-2"
+                >
+                  {icsFileName ? (
+                    <>
+                      <svg className="w-8 h-8 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="text-sm font-medium text-surface-700">{icsFileName}</span>
+                      <span className="text-xs text-surface-400">Click to change file</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-8 h-8 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <span className="text-sm font-medium text-surface-500">Click to select .ics file</span>
+                    </>
+                  )}
+                </button>
+                <p className="mt-1.5 text-xs text-surface-400">
+                  Note: File-based calendars cannot be automatically refreshed
+                </p>
+              </div>
+            )}
+
+            {/* Calendar name */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-surface-700 mb-1.5">
+                Calendar Name
+              </label>
+              <input
+                type="text"
+                value={icsCalendarName}
+                onChange={(e) => setIcsCalendarName(e.target.value)}
+                placeholder="e.g., Work Calendar, Holidays"
+                className="w-full px-3 py-2.5 border border-surface-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                         placeholder:text-surface-400"
+              />
+            </div>
+
+            {/* Error message */}
+            {icsError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-600">{icsError}</p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={resetICSModal}
+                disabled={icsImporting}
+                className="flex-1 py-2.5 text-sm font-medium text-surface-600 
+                         hover:text-surface-900 hover:bg-surface-100 rounded-lg transition-colors
+                         disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleICSImport}
+                disabled={icsImporting}
+                className="flex-1 py-2.5 text-sm font-medium text-white bg-primary-500 
+                         hover:bg-primary-600 rounded-lg transition-colors
+                         disabled:opacity-50 disabled:cursor-not-allowed
+                         flex items-center justify-center gap-2"
+              >
+                {icsImporting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  'Import Calendar'
+                )}
               </button>
             </div>
           </div>

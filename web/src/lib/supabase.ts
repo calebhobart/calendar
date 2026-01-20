@@ -18,6 +18,7 @@ export interface CalendarConnection {
   provider_calendar_id: string | null
   calendar_name: string
   calendar_color: string
+  ics_feed_url: string | null // For ICS/Apple calendars - URL to fetch calendar from
   last_synced_at: string | null
   is_active: boolean
   created_at: string
