@@ -25,6 +25,17 @@ export default function Dashboard() {
   const [icsImporting, setIcsImporting] = useState(false)
   const [icsError, setIcsError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Sidebar collapse state (persist in localStorage)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebarCollapsed')
+    return saved === 'true'
+  })
+  
+  // Persist sidebar state
+  useEffect(() => {
+    localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
 
   // Fetch calendars and events
   const fetchData = useCallback(async () => {
@@ -293,22 +304,47 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-surface-50 flex">
-      {/* Sidebar */}
-      <CalendarSidebar
-        calendars={calendars}
-        activeCalendarIds={activeCalendarIds}
-        onToggleCalendar={handleCalendarToggle}
-        onConnectCalendar={handleConnectCalendar}
-        onSyncCalendar={handleSyncCalendar}
-        onDeleteCalendar={handleDeleteCalendar}
-        onSignOut={handleSignOut}
-        syncingCalendarId={syncing}
-        deletingCalendarId={deleting}
-      />
+      {/* Sidebar with collapse */}
+      <div 
+        className={`transition-all duration-300 ease-in-out ${
+          sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-72'
+        }`}
+      >
+        <CalendarSidebar
+          calendars={calendars}
+          activeCalendarIds={activeCalendarIds}
+          onToggleCalendar={handleCalendarToggle}
+          onConnectCalendar={handleConnectCalendar}
+          onSyncCalendar={handleSyncCalendar}
+          onDeleteCalendar={handleDeleteCalendar}
+          onSignOut={handleSignOut}
+          syncingCalendarId={syncing}
+          deletingCalendarId={deleting}
+        />
+      </div>
 
       {/* Main content */}
       <main className="flex-1 p-6 overflow-auto">
-        <div className="max-w-7xl mx-auto">
+        {/* Toggle sidebar button */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className="mb-4 p-2 text-surface-500 hover:text-surface-700 hover:bg-white 
+                   rounded-lg transition-colors shadow-sm border border-surface-200 bg-white"
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        >
+          {sidebarCollapsed ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            </svg>
+          )}
+        </button>
+
+        <div className={sidebarCollapsed ? 'max-w-full' : 'max-w-7xl mx-auto'}>
           <Calendar
             events={filteredEvents}
             onEventClick={setSelectedEvent}

@@ -141,11 +141,16 @@ export default function Calendar({ events, onEventClick }: CalendarProps) {
           minute: '2-digit',
           meridiem: 'short',
         }}
-        dayHeaderFormat={{
-          weekday: 'short',
-          month: 'numeric',
-          day: 'numeric',
-          omitCommas: true,
+        views={{
+          dayGridMonth: {
+            dayHeaderFormat: { weekday: 'short' }, // Just "Sun", "Mon", etc.
+          },
+          timeGridWeek: {
+            dayHeaderFormat: { weekday: 'short', month: 'numeric', day: 'numeric', omitCommas: true },
+          },
+          timeGridDay: {
+            dayHeaderFormat: { weekday: 'long', month: 'long', day: 'numeric' },
+          },
         }}
       />
 
